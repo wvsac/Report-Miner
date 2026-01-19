@@ -5,7 +5,7 @@ from typing import Optional, Callable
 
 import httpx
 
-from .config import JIRA_BASE_URL, JIRA_TOKEN, JIRA_EMAIL, JIRA_STEPS_FIELD
+from . import config
 from .cache import FileCache
 from .models import JiraIssueData, TestResult
 
@@ -19,12 +19,24 @@ class JiraClient:
     """Client for Jira REST API v3 (Cloud)."""
 
     def __init__(self):
-        self.base_url = JIRA_BASE_URL.rstrip("/")
-        self.email = JIRA_EMAIL
-        self.token = JIRA_TOKEN
-        self.steps_field = JIRA_STEPS_FIELD
         self.cache = FileCache("jira")
-        self._client: Optional[httpx.Client] = None
+        self._http_client: Optional[httpx.Client] = None
+
+    @property
+    def base_url(self) -> str:
+        return config.JIRA_BASE_URL.rstrip("/")
+
+    @property
+    def email(self) -> str:
+        return config.JIRA_EMAIL
+
+    @property
+    def token(self) -> str:
+        return config.JIRA_TOKEN
+
+    @property
+    def steps_field(self) -> str:
+        return config.JIRA_STEPS_FIELD
 
     @property
     def is_configured(self) -> bool:
@@ -39,8 +51,8 @@ class JiraClient:
 
     def _get_client(self) -> httpx.Client:
         """Get or create HTTP client."""
-        if self._client is None:
-            self._client = httpx.Client(
+        if self._http_client is None:
+            self._http_client = httpx.Client(
                 base_url=f"{self.base_url}/rest/api/3",
                 headers={
                     "Authorization": self._get_auth_header(),
@@ -48,13 +60,13 @@ class JiraClient:
                 },
                 timeout=30.0,
             )
-        return self._client
+        return self._http_client
 
     def close(self):
         """Close HTTP client."""
-        if self._client:
-            self._client.close()
-            self._client = None
+        if self._http_client:
+            self._http_client.close()
+            self._http_client = None
 
     def fetch_issue(self, issue_key: str) -> Optional[JiraIssueData]:
         """Fetch issue data from Jira, using cache if available."""
