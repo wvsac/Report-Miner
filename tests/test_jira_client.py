@@ -10,18 +10,18 @@ from reportminer.models import TestResult, TestStatus
 @pytest.fixture
 def mock_config(monkeypatch):
     """Mock Jira configuration."""
-    monkeypatch.setattr("reportminer.jira_client.JIRA_BASE_URL", "https://test.atlassian.net")
-    monkeypatch.setattr("reportminer.jira_client.JIRA_EMAIL", "test@example.com")
-    monkeypatch.setattr("reportminer.jira_client.JIRA_TOKEN", "test-token")
-    monkeypatch.setattr("reportminer.jira_client.JIRA_STEPS_FIELD", "customfield_10100")
+    monkeypatch.setattr("reportminer.config.JIRA_BASE_URL", "https://test.atlassian.net")
+    monkeypatch.setattr("reportminer.config.JIRA_EMAIL", "test@example.com")
+    monkeypatch.setattr("reportminer.config.JIRA_TOKEN", "test-token")
+    monkeypatch.setattr("reportminer.config.JIRA_STEPS_FIELD", "customfield_10100")
 
 
 @pytest.fixture
 def unconfigured_client(monkeypatch):
     """Create a client without credentials."""
-    monkeypatch.setattr("reportminer.jira_client.JIRA_BASE_URL", "https://test.atlassian.net")
-    monkeypatch.setattr("reportminer.jira_client.JIRA_EMAIL", "")
-    monkeypatch.setattr("reportminer.jira_client.JIRA_TOKEN", "")
+    monkeypatch.setattr("reportminer.config.JIRA_BASE_URL", "https://test.atlassian.net")
+    monkeypatch.setattr("reportminer.config.JIRA_EMAIL", "")
+    monkeypatch.setattr("reportminer.config.JIRA_TOKEN", "")
     monkeypatch.setattr("reportminer.jira_client._client", None)
     return JiraClient()
 
