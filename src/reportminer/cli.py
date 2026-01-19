@@ -221,6 +221,8 @@ def main(
                     jira_client.enrich_results(results_to_enrich, progress_callback=progress_cb)
                 except JiraClientError as e:
                     click.echo(f"Warning: Jira enrichment failed: {e}", err=True)
+            else:
+                click.echo("Warning: Jira not configured. Set MINE_JIRA_URL, MINE_JIRA_EMAIL, MINE_JIRA_TOKEN", err=True)
 
         spinner.stop()
 

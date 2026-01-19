@@ -5,7 +5,7 @@ from typing import Optional, Callable
 
 import httpx
 
-from . import config
+from .config import JIRA_BASE_URL, JIRA_TOKEN, JIRA_EMAIL, JIRA_STEPS_FIELD
 from .cache import FileCache
 from .models import JiraIssueData, TestResult
 
@@ -19,24 +19,12 @@ class JiraClient:
     """Client for Jira REST API v3 (Cloud)."""
 
     def __init__(self):
+        self.base_url = JIRA_BASE_URL.rstrip("/")
+        self.email = JIRA_EMAIL
+        self.token = JIRA_TOKEN
+        self.steps_field = JIRA_STEPS_FIELD
         self.cache = FileCache("jira")
         self._client: Optional[httpx.Client] = None
-
-    @property
-    def base_url(self) -> str:
-        return config.JIRA_BASE_URL.rstrip("/")
-
-    @property
-    def email(self) -> str:
-        return config.JIRA_EMAIL
-
-    @property
-    def token(self) -> str:
-        return config.JIRA_TOKEN
-
-    @property
-    def steps_field(self) -> str:
-        return config.JIRA_STEPS_FIELD
 
     @property
     def is_configured(self) -> bool:
