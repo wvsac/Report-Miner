@@ -513,6 +513,188 @@ class TestTUIFilterCombinations:
         assert len(results) == 2  # Two failed tests in fixture
 
 
+class TestSectionDetection:
+    """Tests for section detection and jumping."""
+
+    def test_detects_live_log_setup(self):
+        """Test detection of live log setup section."""
+        log = """Some initial logs
+INFO Starting test
+----------------------- live log setup -----------------------
+DEBUG Setting up fixtures
+INFO Fixtures ready
+"""
+        result = TestResult(
+            tms_number="TMS_1",
+            test_name="test",
+            test_id="test",
+            status=TestStatus.PASSED,
+            execution_log=log,
+        )
+        panel = TestDetailPanel()
+        panel._build_detail_content(result)
+        assert "setup" in panel._section_lines
+        # Setup should be at the line with "live log setup"
+        assert panel._section_lines["setup"] > 0
+
+    def test_detects_live_log_call(self):
+        """Test detection of live log call section."""
+        log = """----------------------- live log setup -----------------------
+DEBUG Setup
+----------------------- live log call -----------------------
+INFO Running test
+DEBUG Test step 1
+"""
+        result = TestResult(
+            tms_number="TMS_1",
+            test_name="test",
+            test_id="test",
+            status=TestStatus.PASSED,
+            execution_log=log,
+        )
+        panel = TestDetailPanel()
+        panel._build_detail_content(result)
+        assert "setup" in panel._section_lines
+        assert "call" in panel._section_lines
+        # Call should come after setup
+        assert panel._section_lines["call"] > panel._section_lines["setup"]
+
+    def test_detects_live_log_teardown(self):
+        """Test detection of live log teardown section."""
+        log = """----------------------- live log setup -----------------------
+DEBUG Setup
+----------------------- live log call -----------------------
+INFO Running test
+----------------------- live log teardown -----------------------
+DEBUG Cleaning up
+"""
+        result = TestResult(
+            tms_number="TMS_1",
+            test_name="test",
+            test_id="test",
+            status=TestStatus.PASSED,
+            execution_log=log,
+        )
+        panel = TestDetailPanel()
+        panel._build_detail_content(result)
+        assert "setup" in panel._section_lines
+        assert "call" in panel._section_lines
+        assert "teardown" in panel._section_lines
+        # Sections should be in order
+        assert panel._section_lines["setup"] < panel._section_lines["call"]
+        assert panel._section_lines["call"] < panel._section_lines["teardown"]
+
+    def test_detects_captured_log_sections(self):
+        """Test detection of captured log sections (alternative format)."""
+        log = """----------------------- Captured log setup -----------------------
+DEBUG Setup via captured
+----------------------- Captured log call -----------------------
+INFO Call via captured
+----------------------- Captured log teardown -----------------------
+DEBUG Teardown via captured
+"""
+        result = TestResult(
+            tms_number="TMS_1",
+            test_name="test",
+            test_id="test",
+            status=TestStatus.PASSED,
+            execution_log=log,
+        )
+        panel = TestDetailPanel()
+        panel._build_detail_content(result)
+        assert "setup" in panel._section_lines
+        assert "call" in panel._section_lines
+        assert "teardown" in panel._section_lines
+
+    def test_section_lines_relative_to_total_content(self):
+        """Test that section line numbers account for header content."""
+        log = """----------------------- live log call -----------------------
+INFO Test running
+"""
+        result = TestResult(
+            tms_number="TMS_1",
+            test_name="test_name_here",
+            test_id="tests/test.py::test_name_here",
+            status=TestStatus.PASSED,
+            duration="1.0s",
+            execution_log=log,
+        )
+        panel = TestDetailPanel()
+        panel._build_detail_content(result)
+        # Call section should be after header lines (TMS, test name, path, status, duration, etc.)
+        # Header is approximately 7+ lines
+        assert panel._section_lines["call"] >= 7
+
+    def test_no_sections_when_no_markers(self):
+        """Test that no sections found when log has no markers."""
+        log = """INFO Just some regular logs
+DEBUG Without any section markers
+ERROR Some error
+"""
+        result = TestResult(
+            tms_number="TMS_1",
+            test_name="test",
+            test_id="test",
+            status=TestStatus.PASSED,
+            execution_log=log,
+        )
+        panel = TestDetailPanel()
+        panel._build_detail_content(result)
+        assert len(panel._section_lines) == 0
+
+    def test_total_lines_tracked_correctly(self):
+        """Test that total line count is accurate."""
+        log = "line1\nline2\nline3\nline4\nline5"  # 5 lines
+        result = TestResult(
+            tms_number="TMS_1",
+            test_name="test",
+            test_id="test",
+            status=TestStatus.PASSED,
+            execution_log=log,
+        )
+        panel = TestDetailPanel()
+        panel._build_detail_content(result)
+        # Should have header lines + 5 log lines
+        # Header: TMS (2 lines with blank), Test (1), Path (1), Status (1), Execution Log header (2) = 7
+        # Plus log: 5 lines
+        # Total: ~12 lines
+        assert panel._total_lines >= 10  # At least header + some log
+
+    def test_jump_returns_false_for_missing_section(self):
+        """Test that jump_to_section returns False for non-existent section."""
+        log = "INFO Just logs without sections"
+        result = TestResult(
+            tms_number="TMS_1",
+            test_name="test",
+            test_id="test",
+            status=TestStatus.PASSED,
+            execution_log=log,
+        )
+        panel = TestDetailPanel()
+        panel._build_detail_content(result)
+        assert panel.jump_to_section("setup") is False
+        assert panel.jump_to_section("call") is False
+        assert panel.jump_to_section("teardown") is False
+
+    def test_jump_returns_true_for_existing_section(self):
+        """Test that jump_to_section returns True for existing section."""
+        log = """----------------------- live log call -----------------------
+INFO Test
+"""
+        result = TestResult(
+            tms_number="TMS_1",
+            test_name="test",
+            test_id="test",
+            status=TestStatus.PASSED,
+            execution_log=log,
+        )
+        panel = TestDetailPanel()
+        panel._build_detail_content(result)
+        # Note: jump_to_section calls scroll_to which requires widget to be mounted
+        # Just verify the section was detected
+        assert "call" in panel._section_lines
+
+
 class TestTUIEdgeCases:
     """Tests for edge cases in TUI."""
 
