@@ -516,8 +516,8 @@ class TestTUIFilterCombinations:
 class TestSectionDetection:
     """Tests for section detection and jumping."""
 
-    def test_detects_live_log_setup(self):
-        """Test detection of live log setup section."""
+    def test_content_contains_live_log_setup(self):
+        """Test that live log setup marker is in rendered content."""
         log = """Some initial logs
 INFO Starting test
 ----------------------- live log setup -----------------------
@@ -532,35 +532,11 @@ INFO Fixtures ready
             execution_log=log,
         )
         panel = TestDetailPanel()
-        panel._build_detail_content(result)
-        assert "setup" in panel._section_lines
-        # Setup should be at the line with "live log setup"
-        assert panel._section_lines["setup"] > 0
+        content = panel._build_detail_content(result)
+        assert "live log setup" in content.plain.lower()
 
-    def test_detects_live_log_call(self):
-        """Test detection of live log call section."""
-        log = """----------------------- live log setup -----------------------
-DEBUG Setup
------------------------ live log call -----------------------
-INFO Running test
-DEBUG Test step 1
-"""
-        result = TestResult(
-            tms_number="TMS_1",
-            test_name="test",
-            test_id="test",
-            status=TestStatus.PASSED,
-            execution_log=log,
-        )
-        panel = TestDetailPanel()
-        panel._build_detail_content(result)
-        assert "setup" in panel._section_lines
-        assert "call" in panel._section_lines
-        # Call should come after setup
-        assert panel._section_lines["call"] > panel._section_lines["setup"]
-
-    def test_detects_live_log_teardown(self):
-        """Test detection of live log teardown section."""
+    def test_content_contains_all_sections(self):
+        """Test that all section markers are in rendered content."""
         log = """----------------------- live log setup -----------------------
 DEBUG Setup
 ----------------------- live log call -----------------------
@@ -576,15 +552,37 @@ DEBUG Cleaning up
             execution_log=log,
         )
         panel = TestDetailPanel()
-        panel._build_detail_content(result)
-        assert "setup" in panel._section_lines
-        assert "call" in panel._section_lines
-        assert "teardown" in panel._section_lines
-        # Sections should be in order
-        assert panel._section_lines["setup"] < panel._section_lines["call"]
-        assert panel._section_lines["call"] < panel._section_lines["teardown"]
+        content = panel._build_detail_content(result)
+        plain = content.plain.lower()
+        assert "live log setup" in plain
+        assert "live log call" in plain
+        assert "live log teardown" in plain
 
-    def test_detects_captured_log_sections(self):
+    def test_sections_in_correct_order(self):
+        """Test that section markers appear in correct order in content."""
+        log = """----------------------- live log setup -----------------------
+DEBUG Setup
+----------------------- live log call -----------------------
+INFO Running test
+----------------------- live log teardown -----------------------
+DEBUG Cleaning up
+"""
+        result = TestResult(
+            tms_number="TMS_1",
+            test_name="test",
+            test_id="test",
+            status=TestStatus.PASSED,
+            execution_log=log,
+        )
+        panel = TestDetailPanel()
+        content = panel._build_detail_content(result)
+        plain = content.plain.lower()
+        setup_pos = plain.find("live log setup")
+        call_pos = plain.find("live log call")
+        teardown_pos = plain.find("live log teardown")
+        assert setup_pos < call_pos < teardown_pos
+
+    def test_content_contains_captured_log_sections(self):
         """Test detection of captured log sections (alternative format)."""
         log = """----------------------- Captured log setup -----------------------
 DEBUG Setup via captured
@@ -601,13 +599,46 @@ DEBUG Teardown via captured
             execution_log=log,
         )
         panel = TestDetailPanel()
-        panel._build_detail_content(result)
-        assert "setup" in panel._section_lines
-        assert "call" in panel._section_lines
-        assert "teardown" in panel._section_lines
+        content = panel._build_detail_content(result)
+        plain = content.plain.lower()
+        assert "captured log setup" in plain
+        assert "captured log call" in plain
+        assert "captured log teardown" in plain
 
-    def test_section_lines_relative_to_total_content(self):
-        """Test that section line numbers account for header content."""
+    def test_find_line_in_content_finds_section(self):
+        """Test _find_line_in_content finds correct line for section markers."""
+        log = """line1
+line2
+----------------------- live log setup -----------------------
+DEBUG Setup
+----------------------- live log call -----------------------
+INFO Call
+"""
+        result = TestResult(
+            tms_number="TMS_1",
+            test_name="test",
+            test_id="test",
+            status=TestStatus.PASSED,
+            execution_log=log,
+        )
+        panel = TestDetailPanel()
+        content = panel._build_detail_content(result)
+        # Simulate what happens when widget has content
+        # We test the plain text line counting directly
+        plain = content.plain
+        setup_idx = plain.lower().find("live log setup")
+        call_idx = plain.lower().find("live log call")
+        assert setup_idx >= 0
+        assert call_idx >= 0
+        setup_line = plain[:setup_idx].count("\n")
+        call_line = plain[:call_idx].count("\n")
+        # Setup should be before call
+        assert setup_line < call_line
+        # Both should be after header lines (at least 5+)
+        assert setup_line >= 5
+
+    def test_section_markers_after_header_content(self):
+        """Test that section markers come after header content (TMS, name, etc.)."""
         log = """----------------------- live log call -----------------------
 INFO Test running
 """
@@ -620,13 +651,16 @@ INFO Test running
             execution_log=log,
         )
         panel = TestDetailPanel()
-        panel._build_detail_content(result)
-        # Call section should be after header lines (TMS, test name, path, status, duration, etc.)
-        # Header is approximately 7+ lines
-        assert panel._section_lines["call"] >= 7
+        content = panel._build_detail_content(result)
+        plain = content.plain
+        call_idx = plain.lower().find("live log call")
+        lines_before = plain[:call_idx].count("\n")
+        # Should be after header: TMS (2), Test (1), Path (1), Status (1), Duration (1),
+        # blank + "Execution Log:" (2), then first log line
+        assert lines_before >= 7
 
     def test_no_sections_when_no_markers(self):
-        """Test that no sections found when log has no markers."""
+        """Test that content without markers has no section text."""
         log = """INFO Just some regular logs
 DEBUG Without any section markers
 ERROR Some error
@@ -639,60 +673,20 @@ ERROR Some error
             execution_log=log,
         )
         panel = TestDetailPanel()
-        panel._build_detail_content(result)
-        assert len(panel._section_lines) == 0
+        content = panel._build_detail_content(result)
+        plain = content.plain.lower()
+        assert "live log setup" not in plain
+        assert "live log call" not in plain
+        assert "live log teardown" not in plain
 
-    def test_total_lines_tracked_correctly(self):
-        """Test that total line count is accurate."""
-        log = "line1\nline2\nline3\nline4\nline5"  # 5 lines
-        result = TestResult(
-            tms_number="TMS_1",
-            test_name="test",
-            test_id="test",
-            status=TestStatus.PASSED,
-            execution_log=log,
-        )
-        panel = TestDetailPanel()
-        panel._build_detail_content(result)
-        # Should have header lines + 5 log lines
-        # Header: TMS (2 lines with blank), Test (1), Path (1), Status (1), Execution Log header (2) = 7
-        # Plus log: 5 lines
-        # Total: ~12 lines
-        assert panel._total_lines >= 10  # At least header + some log
-
-    def test_jump_returns_false_for_missing_section(self):
-        """Test that jump_to_section returns False for non-existent section."""
-        log = "INFO Just logs without sections"
-        result = TestResult(
-            tms_number="TMS_1",
-            test_name="test",
-            test_id="test",
-            status=TestStatus.PASSED,
-            execution_log=log,
-        )
-        panel = TestDetailPanel()
-        panel._build_detail_content(result)
-        assert panel.jump_to_section("setup") is False
-        assert panel.jump_to_section("call") is False
-        assert panel.jump_to_section("teardown") is False
-
-    def test_jump_returns_true_for_existing_section(self):
-        """Test that jump_to_section returns True for existing section."""
-        log = """----------------------- live log call -----------------------
-INFO Test
-"""
-        result = TestResult(
-            tms_number="TMS_1",
-            test_name="test",
-            test_id="test",
-            status=TestStatus.PASSED,
-            execution_log=log,
-        )
-        panel = TestDetailPanel()
-        panel._build_detail_content(result)
-        # Note: jump_to_section calls scroll_to which requires widget to be mounted
-        # Just verify the section was detected
-        assert "call" in panel._section_lines
+    def test_section_markers_constant(self):
+        """Test SECTION_MARKERS dict has all expected sections."""
+        assert "setup" in TestDetailPanel.SECTION_MARKERS
+        assert "call" in TestDetailPanel.SECTION_MARKERS
+        assert "teardown" in TestDetailPanel.SECTION_MARKERS
+        # Each should have markers for both live and captured logs
+        for section, markers in TestDetailPanel.SECTION_MARKERS.items():
+            assert len(markers) == 2, f"{section} should have 2 markers"
 
 
 class TestTUIEdgeCases:

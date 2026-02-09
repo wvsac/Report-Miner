@@ -113,16 +113,21 @@ class TestDetailPanel(VerticalScroll):
         Binding("k", "scroll_up", "Scroll Up", show=False),
     ]
 
+    # Section markers to search for in content
+    SECTION_MARKERS = {
+        "setup": ["live log setup", "captured log setup"],
+        "call": ["live log call", "captured log call"],
+        "teardown": ["live log teardown", "captured log teardown"],
+    }
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.current_test: TestResult | None = None
         self._content_cache: dict[str, Text] = {}
         self._raw_log: str = ""
-        self._section_lines: dict[str, int] = {}
         self._search_query: str = ""
         self._search_matches: list[int] = []
         self._current_match: int = -1
-        self._total_lines: int = 0
 
     def compose(self) -> ComposeResult:
         yield Static("Select a test to view details", id="detail-content")
@@ -146,21 +151,33 @@ class TestDetailPanel(VerticalScroll):
         self.query_one("#detail-content", Static).update(content)
         self.scroll_home(animate=False)
 
+    def _find_line_in_content(self, search_text: str) -> int:
+        """Find the line number of text in the rendered content. Returns -1 if not found."""
+        content_widget = self.query_one("#detail-content", Static)
+        renderable = content_widget.renderable
+        if isinstance(renderable, Text):
+            plain = renderable.plain
+        else:
+            plain = str(renderable)
+
+        idx = plain.lower().find(search_text.lower())
+        if idx < 0:
+            return -1
+
+        # Count newlines before this position = line number
+        return plain[:idx].count("\n")
+
     def jump_to_section(self, section: str) -> bool:
         """Jump to a section (setup/call/teardown). Returns True if found."""
-        if section not in self._section_lines:
-            return False
+        markers = self.SECTION_MARKERS.get(section, [])
 
-        line_num = self._section_lines[section]
+        for marker in markers:
+            line = self._find_line_in_content(marker)
+            if line >= 0:
+                self.scroll_to(y=line, animate=False)
+                return True
 
-        # Map line number to virtual scroll position proportionally
-        # virtual_size.height may differ from _total_lines due to rendering
-        if self._total_lines > 0 and self.virtual_size.height > 0:
-            ratio = max(0, line_num - 1) / self._total_lines
-            target_y = ratio * self.virtual_size.height
-            self.scroll_to(y=target_y, animate=False)
-
-        return True
+        return False
 
     def search_log(self, query: str) -> int:
         """Search for text in log, returns number of matches."""
@@ -171,7 +188,6 @@ class TestDetailPanel(VerticalScroll):
         if not query or not self._raw_log:
             # Rebuild content without highlights
             if self.current_test:
-                # Clear cache to rebuild without highlights
                 cache_key = self.current_test.tms_number
                 if cache_key in self._content_cache:
                     del self._content_cache[cache_key]
@@ -180,12 +196,6 @@ class TestDetailPanel(VerticalScroll):
                 self.query_one("#detail-content", Static).update(content)
             return 0
 
-        # Find all match positions (line numbers in log)
-        lines = self._raw_log.split("\n")
-        for i, line in enumerate(lines):
-            if self._search_query in line.lower():
-                self._search_matches.append(i)
-
         # Rebuild content with highlights (don't cache highlighted version)
         if self.current_test:
             cache_key = self.current_test.tms_number
@@ -193,6 +203,23 @@ class TestDetailPanel(VerticalScroll):
                 del self._content_cache[cache_key]
             content = self._build_detail_content(self.current_test, highlight=query)
             self.query_one("#detail-content", Static).update(content)
+
+        # Find all match positions by searching the rendered plain text
+        content_widget = self.query_one("#detail-content", Static)
+        renderable = content_widget.renderable
+        plain = renderable.plain if isinstance(renderable, Text) else str(renderable)
+        plain_lower = plain.lower()
+        query_lower = query.lower()
+
+        pos = 0
+        while True:
+            idx = plain_lower.find(query_lower, pos)
+            if idx < 0:
+                break
+            # Store the newline count (line number) for this match
+            line_num = plain[:idx].count("\n")
+            self._search_matches.append(line_num)
+            pos = idx + 1
 
         if self._search_matches:
             self._current_match = 0
@@ -218,14 +245,9 @@ class TestDetailPanel(VerticalScroll):
 
     def _scroll_to_match(self, match_idx: int):
         """Scroll to a specific match."""
-        if 0 <= match_idx < len(self._search_matches) and self._total_lines > 0:
-            log_line = self._search_matches[match_idx]
-            # Estimate header takes about 15 lines before log content
-            header_lines = 15
-            target_line = header_lines + log_line
-            ratio = target_line / self._total_lines
-            target_y = ratio * self.virtual_size.height
-            self.scroll_to(y=target_y, animate=False)
+        if 0 <= match_idx < len(self._search_matches):
+            line_num = self._search_matches[match_idx]
+            self.scroll_to(y=line_num, animate=False)
 
     def action_scroll_down(self) -> None:
         self.scroll_down(animate=False)
@@ -248,111 +270,94 @@ class TestDetailPanel(VerticalScroll):
     def _build_detail_content(self, r: TestResult, highlight: str = "") -> Text:
         """Build rich Text content for test details."""
         text = Text()
-        self._section_lines = {}
-        line_count = 0
 
         text.append(r.tms_jira_format, style="bold cyan")
         text.append("\n\n")
-        line_count += 2
 
         if r.jira_summary:
             text.append("Title: ", style="cyan")
             text.append(r.jira_summary)
             text.append("\n")
-            line_count += 1
 
         text.append("Test: ", style="cyan")
         text.append(r.test_name)
         text.append("\n")
-        line_count += 1
 
         text.append("Path: ", style="cyan")
         text.append(r.test_id)
         text.append("\n")
-        line_count += 1
 
         text.append("Status: ", style="cyan")
         status_color = STATUS_COLORS.get(r.status, "white")
         text.append(r.status.value, style=status_color)
         text.append("\n")
-        line_count += 1
 
         if r.duration:
             text.append("Duration: ", style="cyan")
             text.append(r.duration)
             text.append("\n")
-            line_count += 1
 
         if r.failure_reason:
             text.append("\n")
             text.append("Failure Reason:\n", style="yellow bold")
             text.append(r.failure_reason)
             text.append("\n")
-            line_count += r.failure_reason.count("\n") + 3
 
         if r.jira_test_steps:
             text.append("\n")
             text.append("Test Steps:\n", style="green bold")
             text.append(r.jira_test_steps)
             text.append("\n")
-            line_count += r.jira_test_steps.count("\n") + 3
 
         if r.execution_log:
             text.append("\n")
             text.append("Execution Log:\n", style="magenta bold")
-            line_count += 2
-            log_start_line = line_count
-            log_lines = self._append_colored_log(text, r.execution_log, highlight, log_start_line)
-            line_count += log_lines
+            self._append_colored_log(text, r.execution_log, highlight)
 
-        self._total_lines = line_count
         return text
 
-    def _append_colored_log(self, text: Text, log: str, highlight: str, start_line: int) -> int:
-        """Append log content with colored log levels. Returns line count."""
+    def _append_colored_log(self, text: Text, log: str, highlight: str) -> None:
+        """Append log content with colored log levels."""
         highlight_lower = highlight.lower() if highlight else ""
 
         # For very large logs, skip coloring to maintain performance
         skip_coloring = len(log) > 500000  # 500KB+
 
-        lines = log.split("\n")
-        for i, line in enumerate(lines):
-            current_line = start_line + i
-
+        for line in log.split("\n"):
             # Check for section headers first
-            for pattern, section_name in SECTION_PATTERNS:
+            is_section = False
+            for pattern, _ in SECTION_PATTERNS:
                 if pattern.search(line):
-                    if section_name not in self._section_lines:
-                        self._section_lines[section_name] = current_line
                     text.append(line + "\n", style="bold magenta reverse")
+                    is_section = True
                     break
-            else:
-                # Not a section header
-                if skip_coloring:
-                    if highlight_lower and highlight_lower in line.lower():
-                        self._append_highlighted_line(text, line, highlight_lower)
-                    else:
-                        text.append(line + "\n")
-                elif highlight_lower and highlight_lower in line.lower():
+
+            if is_section:
+                continue
+
+            if skip_coloring:
+                if highlight_lower and highlight_lower in line.lower():
                     self._append_highlighted_line(text, line, highlight_lower)
                 else:
-                    match = LOG_LEVEL_PATTERN.search(line)
-                    if match:
-                        level = match.group(1).upper()
-                        color = LOG_COLORS.get(level, "white")
-                        idx = match.start()
-                        level_end = match.end()
+                    text.append(line + "\n")
+            elif highlight_lower and highlight_lower in line.lower():
+                self._append_highlighted_line(text, line, highlight_lower)
+            else:
+                match = LOG_LEVEL_PATTERN.search(line)
+                if match:
+                    level = match.group(1).upper()
+                    color = LOG_COLORS.get(level, "white")
+                    idx = match.start()
+                    level_end = match.end()
 
-                        if idx > 0:
-                            text.append(line[:idx])
-                        text.append(line[idx:level_end], style=color)
-                        if level_end < len(line):
-                            text.append(line[level_end:])
-                        text.append("\n")
-                    else:
-                        text.append(line + "\n")
-
-        return len(lines)
+                    if idx > 0:
+                        text.append(line[:idx])
+                    text.append(line[idx:level_end], style=color)
+                    if level_end < len(line):
+                        text.append(line[level_end:])
+                    text.append("\n")
+                else:
+                    text.append(line + "\n")
 
     def _append_highlighted_line(self, text: Text, line: str, highlight_lower: str) -> None:
         """Append a line with search term highlighted."""
@@ -492,6 +497,7 @@ class ReportViewerApp(App):
         Binding("m", "show_marked", "Marked"),
         Binding("y", "copy_marked", "Copy"),
         Binding("c", "copy_current", "Copy TMS", show=False),
+        Binding("C", "copy_log", "Copy Log", show=False),
         Binding("o", "open_jira", "Jira"),
         Binding("enter", "focus_detail", "Logs"),
         Binding("tab", "switch_focus", "Switch", show=False),
@@ -804,7 +810,7 @@ class ReportViewerApp(App):
         detail_panel = self.query_one("#detail-panel", TestDetailPanel)
         if detail_panel.current_test:
             detail_panel.focus()
-            self.notify("/ search, 1/2/3 jump", timeout=1)
+            self.notify("/ search, 1/2/3 jump, C log", timeout=1)
 
     def action_switch_focus(self):
         """Switch focus between list and detail panel (Tab key)."""
@@ -884,6 +890,17 @@ class ReportViewerApp(App):
         else:
             self.notify("No test", timeout=1)
 
+    def action_copy_log(self):
+        """Copy full execution log to clipboard (Shift+C)."""
+        detail_panel = self.query_one("#detail-panel", TestDetailPanel)
+        if detail_panel.current_test and detail_panel.current_test.execution_log:
+            if copy_to_clipboard(detail_panel.current_test.execution_log):
+                self.notify("Log copied", timeout=1)
+            else:
+                self.notify("Copy failed", timeout=1)
+        else:
+            self.notify("No log", timeout=1)
+
     def action_open_jira(self):
         detail_panel = self.query_one("#detail-panel", TestDetailPanel)
         if detail_panel.current_test:
@@ -934,4 +951,4 @@ class ReportViewerApp(App):
             detail_panel = self.query_one("#detail-panel", TestDetailPanel)
             detail_panel.show_test(event.item.result)
             detail_panel.focus()
-            self.notify("/ search, 1/2/3 jump", timeout=1)
+            self.notify("/ search, 1/2/3 jump, C log", timeout=1)
