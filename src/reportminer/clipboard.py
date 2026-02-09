@@ -9,54 +9,48 @@ def copy_to_clipboard(text: str) -> bool:
     """Copy text to system clipboard. Returns True if successful."""
     try:
         if sys.platform == "darwin":
-            # macOS
-            process = subprocess.Popen(
-                ["pbcopy"],
-                stdin=subprocess.PIPE,
-            )
-            process.communicate(text.encode("utf-8"))
-            return process.returncode == 0
+            return _run_clipboard_cmd(["pbcopy"], text)
 
         elif sys.platform == "linux":
-            # Linux - try multiple clipboard tools
-            # Order: wl-copy (Wayland), xclip, xsel
-            clipboard_commands = []
+            # Try multiple clipboard tools in order of preference
+            commands = []
 
-            # Check for Wayland
+            # Wayland
             if os.environ.get("WAYLAND_DISPLAY"):
-                clipboard_commands.append(["wl-copy"])
+                commands.append(["wl-copy"])
 
-            # X11 clipboard tools
-            clipboard_commands.extend([
-                ["xclip", "-selection", "clipboard"],
+            # X11 - xsel is more reliable than xclip for piped input
+            # (xclip can lose clipboard when process exits)
+            commands.extend([
                 ["xsel", "--clipboard", "--input"],
+                ["xclip", "-selection", "clipboard"],
             ])
 
-            for cmd in clipboard_commands:
+            for cmd in commands:
                 try:
-                    process = subprocess.Popen(
-                        cmd,
-                        stdin=subprocess.PIPE,
-                        stderr=subprocess.DEVNULL,
-                    )
-                    process.communicate(text.encode("utf-8"))
-                    if process.returncode == 0:
+                    if _run_clipboard_cmd(cmd, text):
                         return True
                 except FileNotFoundError:
                     continue
             return False
 
         elif sys.platform == "win32":
-            # Windows
-            process = subprocess.Popen(
-                ["clip"],
-                stdin=subprocess.PIPE,
-            )
-            process.communicate(text.encode("utf-8"))
-            return process.returncode == 0
+            return _run_clipboard_cmd(["clip"], text)
 
         else:
             return False
 
     except Exception:
         return False
+
+
+def _run_clipboard_cmd(cmd: list[str], text: str) -> bool:
+    """Run a clipboard command, piping text to stdin."""
+    result = subprocess.run(
+        cmd,
+        input=text.encode("utf-8"),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=5,
+    )
+    return result.returncode == 0

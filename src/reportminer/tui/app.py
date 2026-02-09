@@ -151,15 +151,17 @@ class TestDetailPanel(VerticalScroll):
         self.query_one("#detail-content", Static).update(content)
         self.scroll_home(animate=False)
 
+    def _get_plain_content(self) -> str:
+        """Get plain text from the detail content widget."""
+        content_widget = self.query_one("#detail-content", Static)
+        content = content_widget.content
+        if isinstance(content, Text):
+            return content.plain
+        return str(content)
+
     def _find_line_in_content(self, search_text: str) -> int:
         """Find the line number of text in the rendered content. Returns -1 if not found."""
-        content_widget = self.query_one("#detail-content", Static)
-        renderable = content_widget.renderable
-        if isinstance(renderable, Text):
-            plain = renderable.plain
-        else:
-            plain = str(renderable)
-
+        plain = self._get_plain_content()
         idx = plain.lower().find(search_text.lower())
         if idx < 0:
             return -1
@@ -205,9 +207,7 @@ class TestDetailPanel(VerticalScroll):
             self.query_one("#detail-content", Static).update(content)
 
         # Find all match positions by searching the rendered plain text
-        content_widget = self.query_one("#detail-content", Static)
-        renderable = content_widget.renderable
-        plain = renderable.plain if isinstance(renderable, Text) else str(renderable)
+        plain = self._get_plain_content()
         plain_lower = plain.lower()
         query_lower = query.lower()
 
